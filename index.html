@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Beatbot</title>
+  <style>
+    :root{--bg:#0b0f14;--fg:#e9f0ff;--muted:#92a0b6;--a:#7cf;--b:#f7a;--c:#9f7;}
+    *{box-sizing:border-box} body{margin:0;font:14px/1.35 system-ui;background:radial-gradient(1200px 600px at 20% 0%,#142032,transparent),var(--bg);color:var(--fg)}
+    .wrap{max-width:980px;margin:24px auto;padding:16px}
+    h1{margin:0 0 12px;font-size:22px;letter-spacing:.2px}
+    .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+    .card{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:12px;backdrop-filter:blur(8px)}
+    button{appearance:none;border:0;border-radius:12px;padding:10px 12px;color:var(--fg);background:rgba(255,255,255,.08);cursor:pointer}
+    button:hover{background:rgba(255,255,255,.12)}
+    button.primary{background:linear-gradient(135deg,rgba(124,204,255,.35),rgba(255,119,180,.25))}
+    button.danger{background:rgba(255,80,80,.18)}
+    label{display:flex;gap:8px;align-items:center;color:var(--muted)}
+    input[type=range]{width:160px}
+    .grid{display:grid;grid-template-columns:88px repeat(16,1fr);gap:6px;align-items:center}
+    .trk{color:var(--muted);font-weight:600}
+    .step{height:28px;border-radius:10px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.04);cursor:pointer;position:relative;overflow:hidden}
+    .step.on::before{content:"";position:absolute;inset:0;opacity:.9}
+    .k .step.on::before{background:linear-gradient(180deg,rgba(124,204,255,.8),rgba(124,204,255,.15))}
+    .s .step.on::before{background:linear-gradient(180deg,rgba(255,119,180,.8),rgba(255,119,180,.15))}
+    .h .step.on::before{background:linear-gradient(180deg,rgba(153,255,119,.8),rgba(153,255,119,.15))}
+    .step.play{outline:2px solid rgba(255,255,255,.28)}
+    .tiny{font-size:12px;color:var(--muted)}
+    .pill{padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.08);color:var(--muted)}
+    .footer{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:10px}
+    .kbd{border:1px solid rgba(255,255,255,.12);padding:2px 6px;border-radius:8px;color:var(--muted)}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Beatbot — простая драм‑машина, которая умеет «эволюционировать» 🥁</h1>
+
+    <div class="row">
+      <div class="card row" style="flex:1;min-width:320px">
+        <button id="start" class="primary">▶ Start</button>
+        <button id="stop">■ Stop</button>
+        <button id="rand">🎲 Random</button>
+        <button id="clear" class="danger">✕ Clear</button>
+        <span class="pill" id="bar">bar 1</span>
+      </div>
+
+      <div class="card row">
+        <label>Tempo <input id="bpm" type="range" min="70" max="180" value="120" /> <b id="bpmv">120</b></label>
+        <label>Swing <input id="sw" type="range" min="0" max="60" value="12" /> <b id="swv">12</b></label>
+        <label><input id="evo" type="checkbox" checked /> evolve</label>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <div class="grid" id="grid"></div>
+      <div class="footer tiny">
+        <div>клик по клеткам: включить/выключить • <span class="kbd">Space</span> старт/стоп • <span class="kbd">R</span> рандом</div>
+        <div>подсказка: на 4‑й такт «evolve» слегка меняет паттерн</div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  // --- state ---
+  const tracks = [
+    { id:"k", name:"Kick", color:"var(--a)", pat:new Array(16).fill(0) },
+    { id:"s", name:"Snare", color:"var(--b)", pat:new Array(16).fill(0) },
+    { id:"h", name:"Hat",  color:"var(--c)", pat:new Array(16).fill(0) },
+  ];
+  let ac, master, t0=0, step=0, timer=null, bar=1;
+
+  // --- ui ---
+  const $ = (s)=>document.querySelector(s);
+  const grid = $("#grid"), barEl=$("#bar"), bpm=$("#bpm"), sw=$("#sw"), evo=$("#evo");
+  const bpmv=$("#bpmv"), swv=$("#swv");
+  bpm.oninput=()=>bpmv.textContent=bpm.value;
+  sw.oninput=()=>swv.textContent=sw.value;
+
+  // build grid
+  function build(){
+    grid.innerHTML="";
+    tracks.forEach(tr=>{
+      const label=document.createElement("div");
+      label.className="trk"; label.textContent=tr.name;
+      grid.appendChild(label);
+      for(let i=0;i<16;i++){
+        const c=document.createElement("div");
+        c.className=`step ${tr.id}`;
+        c.dataset.t=tr.id; c.dataset.i=i;
+        c.onclick=()=>{ tr.pat[i]^=1; render(); };
+        grid.appendChild(c);
+      }
+    });
+    render();
+  }
+
+  function render(){
+    grid.querySelectorAll('.step').forEach(el=>{
+      const tr=tracks.find(x=>x.id===el.dataset.t);
+      const i=+el.dataset.i;
+      el.classList.toggle('on', !!tr.pat[i]);
+      el.classList.toggle('play', i===step);
+      el.style.boxShadow = tr.pat[i] ? `0 0 0 1px rgba(255,255,255,.08), 0 8px 18px -12px ${tr.color}` : "";
+    });
+  }
+
+  // --- audio ---
+  function ensureAudio(){
+    if(ac) return;
+    ac = new (window.AudioContext||window.webkitAudioContext)();
+    master = ac.createGain();
+    master.gain.value = 0.85;
+    master.connect(ac.destination);
+  }
+
+  const now = ()=>ac.currentTime;
+  const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+
+  function kick(t){
+    const o=ac.createOscillator(), g=ac.createGain();
+    o.type='sine';
+    o.frequency.setValueAtTime(150,t);
+    o.frequency.exponentialRampToValueAtTime(45,t+0.10);
+    g.gain.setValueAtTime(1.0,t);
+    g.gain.exponentialRampToValueAtTime(0.001,t+0.12);
+    o.connect(g); g.connect(master);
+    o.start(t); o.stop(t+0.13);
+  }
+
+  function noise(){
+    const b=ac.createBuffer(1, ac.sampleRate*0.25, ac.sampleRate);
+    const d=b.getChannelData(0);
+    for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1);
+    return b;
+  }
+  const NOISE = () => (ensureAudio(), noise());
+
+  function snare(t){
+    const src=ac.createBufferSource(); src.buffer=NOISE();
+    const hp=ac.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=900;
+    const g=ac.createGain();
+    g.gain.setValueAtTime(0.9,t);
+    g.gain.exponentialRampToValueAtTime(0.001,t+0.12);
+    src.connect(hp); hp.connect(g); g.connect(master);
+    src.start(t); src.stop(t+0.13);
+  }
+
+  function hat(t){
+    const src=ac.createBufferSource(); src.buffer=NOISE();
+    const bp=ac.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=9000; bp.Q.value=0.8;
+    const g=ac.createGain();
+    g.gain.setValueAtTime(0.35,t);
+    g.gain.exponentialRampToValueAtTime(0.001,t+0.045);
+    src.connect(bp); bp.connect(g); g.connect(master);
+    src.start(t); src.stop(t+0.05);
+  }
+
+  function trig(tr,t){
+    if(tr.id==='k') kick(t);
+    if(tr.id==='s') snare(t);
+    if(tr.id==='h') hat(t);
+  }
+
+  // --- sequencer ---
+  function stepDur(){
+    const bpmVal=+bpm.value;
+    return 60 / bpmVal / 4; // 16th
+  }
+
+  function swingOffset(i){
+    const amt=+sw.value/1000; // ms-ish to seconds scale
+    return (i%2===1) ? amt : 0;
+  }
+
+  function scheduleOne(i, at){
+    tracks.forEach(tr=> tr.pat[i] && trig(tr, at));
+  }
+
+  function evolve(){
+    if(!evo.checked) return;
+    // keep anchors, nudge the rest
+    tracks.forEach(tr=>{
+      for(let i=0;i<16;i++){
+        const anchor = (tr.id==='k' && (i===0||i===8)) || (tr.id==='s' && (i===4||i===12));
+        if(anchor) continue;
+        if(Math.random()<0.10) tr.pat[i]^=1;
+      }
+    });
+  }
+
+  function tick(){
+    ensureAudio();
+    const sd=stepDur();
+    const lookAhead=0.12;
+
+    while(t0 < now()+lookAhead){
+      const i=step;
+      const at=t0 + swingOffset(i);
+      scheduleOne(i, at);
+
+      t0 += sd;
+      step = (step+1) % 16;
+      if(step===0){
+        bar = (bar%4)+1;
+        barEl.textContent = `bar ${bar}`;
+        if(bar===4) evolve();
+      }
+    }
+
+    render();
+  }
+
+  function start(){
+    ensureAudio();
+    if(timer) return;
+    if(ac.state==='suspended') ac.resume();
+    t0 = now() + 0.05;
+    timer = setInterval(tick, 25);
+    $("#start").textContent = "⏵ Playing";
+  }
+
+  function stop(){
+    if(timer) clearInterval(timer);
+    timer=null; step=0; bar=1; barEl.textContent="bar 1";
+    $("#start").textContent = "▶ Start";
+    render();
+  }
+
+  function randomize(){
+    tracks.forEach(tr=>{
+      for(let i=0;i<16;i++) tr.pat[i]=0;
+      // friendly defaults
+      if(tr.id==='k') [0,7,8,15].forEach(i=>tr.pat[i]=Math.random()<0.85?1:0);
+      if(tr.id==='s') [4,12].forEach(i=>tr.pat[i]=1);
+      if(tr.id==='h') for(let i=0;i<16;i++) tr.pat[i]=(Math.random()<0.55?1:0);
+      // spice
+      for(let i=0;i<16;i++) if(Math.random()<0.12) tr.pat[i]^=1;
+    });
+    render();
+  }
+
+  function clearAll(){
+    tracks.forEach(tr=>tr.pat.fill(0));
+    render();
+  }
+
+  // buttons
+  $("#start").onclick=start;
+  $("#stop").onclick=stop;
+  $("#rand").onclick=randomize;
+  $("#clear").onclick=clearAll;
+
+  // keyboard
+  window.addEventListener('keydown', (e)=>{
+    if(e.code==='Space'){ e.preventDefault(); timer?stop():start(); }
+    if(e.key.toLowerCase()==='r') randomize();
+  });
+
+  // init demo pattern
+  tracks[0].pat = [1,0,0,0, 0,0,1,0, 1,0,0,0, 0,1,0,0];
+  tracks[1].pat = [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0];
+  tracks[2].pat = [1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0];
+  build();
+})();
+</script>
+</body>
+</html>
